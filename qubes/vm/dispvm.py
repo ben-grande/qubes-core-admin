@@ -46,6 +46,7 @@ PRELOAD_OUTDATED_IGNORED_PROPERTIES = [
     "klass",
     "name",
     "qid",
+    "rebootable",
     "start_time",
     "stubdom_uuid",
     "stubdom_xid",
@@ -59,6 +60,18 @@ PRELOAD_OUTDATED_IGNORED_PROPERTIES = [
     "visible_ip6",
     "xid",
 ]
+
+
+def _setter_rebootable(self, prop, value):
+    newvalue = qubes.property.bool(self, prop, value)
+    if newvalue and getattr(self, "auto_cleanup", None):
+        raise qubes.exc.QubesPropertyValueError(
+            self,
+            prop,
+            value,
+            "rebootable cannot be True when qube has auto_cleanup=True",
+        )
+    return newvalue
 
 
 def _setter_template(self, prop, value):
@@ -274,6 +287,20 @@ class DispVM(qubes.vm.qubesvm.QubesVM):
         type=bool,
         default=(lambda self: not self.auto_cleanup),
         doc="If this domain is to be included in default backup.",
+    )
+
+    rebootable = qubes.property(
+        "rebootable",
+        load_stage=4,
+        type=bool,
+        setter=_setter_rebootable,
+        default=(
+            lambda self: not self.auto_cleanup
+            or qubes.vm.qubesvm.default_with_template(
+                "rebootable", self.app.default_rebootable
+            )
+        ),
+        doc="Allow qube reboot request to be acknowledged",
     )
 
     default_dispvm = qubes.VMProperty(

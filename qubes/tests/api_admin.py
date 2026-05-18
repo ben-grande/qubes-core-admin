@@ -2389,6 +2389,8 @@ default_pool_private default=True type=str varlibqubes
 default_pool_root default=True type=str varlibqubes
 default_pool_volatile default=True type=str varlibqubes
 default_qrexec_timeout default=True type=int 60
+default_rebootable default=True type=bool False
+default_rebootable_threshold default=True type=int 300
 default_shutdown_timeout default=True type=int 60
 default_template default=False type=vm test-template
 management_dispvm default=True type=vm 

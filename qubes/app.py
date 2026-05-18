@@ -1295,6 +1295,24 @@ class Qubes(qubes.PropertyHolder):
         doc="""Default time in seconds for VM shutdown to complete""",
     )
 
+    default_rebootable = qubes.property(
+        "default_rebootable",
+        load_stage=3,
+        type=bool,
+        setter=qubes.property.bool,
+        default=False,
+        doc="Default setting for qube reboot requests to be acknowledged",
+    )
+
+    default_rebootable_threshold = qubes.property(
+        "default_rebootable_threshold",
+        load_stage=3,
+        type=int,
+        setter=qubes.vm.qubesvm.setter_positive_int,
+        default=300,
+        doc="Default threshold in seconds to allow the next consecutive reboot",
+    )
+
     stats_interval = qubes.property(
         "stats_interval",
         load_stage=3,

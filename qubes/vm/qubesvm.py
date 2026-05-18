@@ -23,6 +23,7 @@
 
 import asyncio
 import base64
+import datetime
 import grp
 import pathlib
 import re
@@ -100,7 +101,7 @@ def _setter_kernelopts(self, prop, value):
     return value
 
 
-def _setter_positive_int(self, prop, value):
+def setter_positive_int(self, prop, value):
     """Helper for setting a positive int. Checks that the int is > 0"""
     # pylint: disable=unused-argument
     value = int(value)
@@ -260,7 +261,7 @@ def _default_virt_mode(self):
         return "pvh"
 
 
-def _default_with_template(prop, default):
+def default_with_template(prop, default):
     """Return a callable for 'default' argument of a property. Use a value
     from a template (if any), otherwise *default*
     """
@@ -293,7 +294,7 @@ def _default_maxmem(self):
         default_maxmem, int(self.app.host.memory_total / 1024 / 2)
     )
 
-    return _default_with_template("maxmem", default_maxmem)(self)
+    return default_with_template("maxmem", default_maxmem)(self)
 
 
 def _default_kernelopts(self):
@@ -835,9 +836,9 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
     memory = qubes.property(
         "memory",
         type=int,
-        setter=_setter_positive_int,
+        setter=setter_positive_int,
         # fmt: off
-        default=_default_with_template(
+        default=default_with_template(
             "memory",
             lambda self: qubes.config.defaults[
                 (
@@ -866,7 +867,7 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
     stubdom_mem = qubes.property(
         "stubdom_mem",
         type=int,
-        setter=_setter_positive_int,
+        setter=setter_positive_int,
         default=None,
         doc="Memory amount allocated for the stubdom",
     )
@@ -874,8 +875,8 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
     vcpus = qubes.property(
         "vcpus",
         type=int,
-        setter=_setter_positive_int,
-        default=_default_with_template("vcpus", 2),
+        setter=setter_positive_int,
+        default=default_with_template("vcpus", 2),
         doc="Number of virtual CPUs for a qube. TemplateBasedVMs use its "
         "template's value by default.",
     )
@@ -885,7 +886,7 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
         "kernel",
         type=str,
         setter=_setter_kernel,
-        default=_default_with_template(
+        default=default_with_template(
             "kernel", lambda self: self.app.default_kernel
         ),
         doc="Kernel used by this domain. TemplateBasedVMs use its "
@@ -919,7 +920,7 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
         "default_user",
         type=str,
         # pylint: disable=no-member
-        default=_default_with_template("default_user", "user"),
+        default=default_with_template("default_user", "user"),
         setter=_setter_default_user,
         doc="Default user to start applications as. TemplateBasedVMs use its "
         "template's value by default.",
@@ -928,10 +929,10 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
     qrexec_timeout = qubes.property(
         "qrexec_timeout",
         type=int,
-        default=_default_with_template(
+        default=default_with_template(
             "qrexec_timeout", lambda self: self.app.default_qrexec_timeout
         ),
-        setter=_setter_positive_int,
+        setter=setter_positive_int,
         doc="""Time in seconds after which qrexec connection attempt is deemed
             failed. Operating system inside VM should be able to boot in this
             time.""",
@@ -940,10 +941,10 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
     shutdown_timeout = qubes.property(
         "shutdown_timeout",
         type=int,
-        default=_default_with_template(
+        default=default_with_template(
             "shutdown_timeout", lambda self: self.app.default_shutdown_timeout
         ),
-        setter=_setter_positive_int,
+        setter=setter_positive_int,
         doc="""Time in seconds for shutdown of the VM, after which VM may be
             forcefully powered off. Operating system inside VM should be
             able to fully shutdown in this time.""",
@@ -956,6 +957,29 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
         setter=qubes.property.bool,
         doc="""Setting this to `True` means that VM should be autostarted on
             dom0 boot.""",
+    )
+
+    rebootable = qubes.property(
+        "rebootable",
+        load_stage=4,
+        type=bool,
+        setter=qubes.property.bool,
+        default=default_with_template(
+            "rebootable", lambda self: self.app.default_rebootable
+        ),
+        doc="Allow qube reboot request to be acknowledged",
+    )
+
+    rebootable_threshold = qubes.property(
+        "rebootable_threshold",
+        load_stage=4,
+        type=int,
+        setter=setter_positive_int,
+        default=default_with_template(
+            "rebootable_threshold",
+            lambda self: self.app.default_rebootable_threshold,
+        ),
+        doc="Threshold in seconds to allow the next consecutive reboot",
     )
 
     include_in_backups = qubes.property(
@@ -987,7 +1011,7 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
         "management_dispvm",
         load_stage=4,
         allow_none=True,
-        default=_default_with_template(
+        default=default_with_template(
             "management_dispvm", (lambda self: self.app.management_dispvm)
         ),
         setter=qubes.vm.setter_disposable_template,
@@ -1269,6 +1293,12 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
         self._domain_stopped_lock = asyncio.Lock()
 
         self.skip_unpause_event = None
+        self._start_requested = False
+        # As this attribute is not saved to the store, qubesd restart will
+        # reset this attribute, allowing another reboot to happen. If you are
+        # worrited about multiple consecutive reboots, the best thing is to
+        # disable the "rebootable" property.
+        self._last_reboot_time = None
 
         if xml is None:
             # we are creating new VM and attributes came through kwargs
@@ -1814,11 +1844,30 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
             return
 
         self._domain_stopped_event_received = True
-        self._domain_stopped_future = asyncio.ensure_future(
-            self._domain_stopped_coro()
-        )
 
-    async def _domain_stopped_coro(self):
+        if reboot := self.rebootable and getattr(
+            self, "_start_requested", False
+        ):
+            now = datetime.datetime.now(datetime.UTC)
+            if self._last_reboot_time is None:
+                self._last_reboot_time = now
+            else:
+                delta = now - self._last_reboot_time
+                threshold = datetime.timedelta(
+                    seconds=self.rebootable_threshold
+                )
+                if delta < threshold:
+                    self.log.error(
+                        "Skipping reboot as time threshold was not met, allowed"
+                        "after %ds",
+                        int((threshold - delta).total_seconds()),
+                    )
+                    reboot = False
+        else:
+            self._last_reboot_time = None
+        asyncio.ensure_future(self._domain_stopped_coro(reboot=reboot))
+
+    async def _domain_stopped_coro(self, reboot: bool = False):
         async with self._domain_stopped_lock:
             assert not self._domain_stopped_event_handled
 
@@ -1832,6 +1881,9 @@ class QubesVM(qubes.vm.mix.net.NetVMMixin, qubes.vm.LocalVM):
                 await self.fire_event_async("domain-stopped")
                 await self.fire_event_async("domain-shutdown")
                 self.end_lifecycle_waiter(event="STOPPED")
+                if reboot:
+                    asyncio.ensure_future(self.start())
+                self._start_requested = False
             except Exception as e:
                 self.end_lifecycle_waiter(event="STOPPED", exc=e)
                 raise
