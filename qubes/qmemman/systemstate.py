@@ -127,6 +127,8 @@ class SystemState:
                 continue
             dom = self.dom_dict[domid]
             dom.paused = paused
+            if not dom.paused:
+                dom.no_progress = True
             # Real memory usage
             dom.mem_current = domain["mem_kb"] * 1024
             # What VM is using or can use
@@ -167,7 +169,8 @@ class SystemState:
             # some free memory available.
             assert isinstance(dom.mem_actual, int)
             if (
-                dom.mem_actual <= dom.last_target + XEN_FREE_MEM_LEFT / 2
+                not dom.paused
+                or dom.mem_actual <= dom.last_target + XEN_FREE_MEM_LEFT / 2
                 or dom.mem_actual < qubes.qmemman.algo.pref_mem(dom)
             ):
                 dom.slow_memset_react = False
@@ -178,6 +181,7 @@ class SystemState:
     def mem_set(self, domid, val) -> None:
         self.log.info("mem-set domain {} to {}".format(domid, val))
         dom = self.dom_dict[domid]
+        assert not dom.paused
         dom.last_target = val
         # Can happen in the middle of domain shutdown apparently xc.lowlevel
         # throws exceptions too.
@@ -209,7 +213,8 @@ class SystemState:
         self.log.debug("inhibit_balloon_up()")
         for domid, dom in self.dom_dict.items():
             if (
-                dom.mem_actual is not None
+                not dom.paused
+                and dom.mem_actual is not None
                 and dom.mem_actual + 200 * 1024 < dom.last_target
             ):
                 self.log.info(
@@ -225,7 +230,8 @@ class SystemState:
         prev_mem_actual: dict[str, Optional[int]] = {}
 
         for dom in self.dom_dict.values():
-            dom.no_progress = False
+            if not dom.paused:
+                dom.no_progress = False
 
         #: helper array for holding free memory size, CHECK_PERIOD_S seconds
         #: ago, at every loop iteration
@@ -285,7 +291,8 @@ class SystemState:
         }
 
         for _, dom in dom_dict.items():
-            dom.no_progress = False
+            if not dom.paused:
+                dom.no_progress = False
 
         mem_set_threshold = 1.1
         succeeded = []
@@ -339,7 +346,10 @@ class SystemState:
                         memset_reqs[domid] = mem_pref
                         self.log.info("adjusted pref to '%s'", mem_pref)
                 diff = round(dom.mem_actual / memset_reqs[domid], 2)
-                if domid not in succeeded and diff <= mem_set_threshold:
+                if domid not in succeeded and (
+                    diff <= mem_set_threshold
+                    or dom.paused
+                ):
                     succeeded.append(domid)
                 self.log.debug(
                     "round '%d' dom '%s' has actual mem of %s (%sx)",
@@ -437,6 +447,7 @@ class SystemState:
                         dom.mem_actual,
                         qubes.qmemman.algo.pref_mem(dom),
                         dom.last_target,
+                        " paused" if dom.paused else "",
                         " no_progress" if dom.no_progress else "",
                         (" slow_memset_react" if dom.slow_memset_react else ""),
                     )
